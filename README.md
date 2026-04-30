@@ -214,7 +214,31 @@ python3 mindmap_memory.py decay
 
 ## 文件结构
 
-```\nmindmap-memory/\n├── mindmap_memory.py      # 核心引擎 (2407 行)\n├── SKILL.md               # Hermes Skill 描述\n├── README.md              # 项目文档\n├── install.sh             # 一键安装脚本\n├── .gitignore\n├── demo_mindmap.db        # 演示用种子数据库\n├── scripts/\n│   ├── decay_worker.py    # 定时衰减工作脚本\n│   ├── migrate.py         # 旧记忆迁移工具\n│   ├── sync_native.py     # 原生记忆同步便捷脚本\n│   ├── seed_demo.py       # 演示数据生成脚本\n│   ├── stress_test.py     # 26 项压力测试\n│   ├── edge_tests.py      # 12 项边界值测试\n│   └── pre_release_tests.py  # 18 项发布前补充测试\n└── tools/\n    └── memory_tree_tool.py   # Hermes 原生工具注册
+```
+mindmap-memory/
+├── mindmap_memory.py      # 核心引擎 (2407 行)
+├── SKILL.md               # Hermes Skill 描述
+├── README.md              # 项目文档
+├── LICENSE                # MIT 开源许可证
+├── CONTRIBUTING.md        # 贡献指南
+├── SECURITY.md            # 安全策略
+├── install.sh             # 一键安装脚本
+├── .gitignore
+├── demo_mindmap.db        # 演示用种子数据库
+├── .github/
+│   ├── workflows/test.yml # CI 自动测试 (Python 3.9-3.12)
+│   ├── ISSUE_TEMPLATE.md  # Bug 报告模板
+│   └── PULL_REQUEST_TEMPLATE.md  # PR 模板
+├── scripts/
+│   ├── decay_worker.py    # 定时衰减工作脚本
+│   ├── migrate.py         # 旧记忆迁移工具
+│   ├── sync_native.py     # 原生记忆同步便捷脚本
+│   ├── seed_demo.py       # 演示数据生成脚本
+│   ├── stress_test.py     # 26 项压力测试
+│   ├── edge_tests.py      # 12 项边界值测试
+│   └── pre_release_tests.py  # 18 项发布前补充测试
+└── tools/
+    └── memory_tree_tool.py   # Hermes 原生工具注册
 
 ~/.hermes/memories/
 ├── mindmap.db             # SQLite 记忆数据库

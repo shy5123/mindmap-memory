@@ -217,7 +217,7 @@ export MEMORYTREE_EMBEDDING_MODEL=local:BAAI/bge-small-zh-v1.5
    无需修改 toolsets.py。
    下次 Hermes 进程重启自动发现。
 
-5. **GitHub 发布清单**：先隐私审计 → 创建 demo 种子脚本 → 更新 .gitignore → 确认 14 个文件（无 .db 泄露、无 API key） → git push + tag。
+5. **GitHub 发布清单**：先隐私审计 → 创建 demo 种子脚本 → 更新 .gitignore → 确认文件完整 → git push + tag。
 
 6. **`deleted` 标志未持久化到 SQLite（v1.2.1 已修复）** —
    修复内容：schema 加 `deleted INTEGER DEFAULT 0` 和 `deleted_at TEXT DEFAULT ''` 列；
