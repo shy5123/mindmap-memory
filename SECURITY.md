@@ -4,7 +4,8 @@
 
 如果发现安全漏洞，请**不要**提交公开 Issue。
 
-请发送邮件至：**shy5123@vip.qq.com**
+请使用 GitHub 私有安全报告通道：
+👉 **[报告安全漏洞 / Report a Vulnerability](https://github.com/shy5123/mindmap-memory/security/advisories/new)**
 
 我会在 48 小时内回复，并在修复完成后公开发布安全公告。
 
