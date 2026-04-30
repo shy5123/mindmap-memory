@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Runtime data (demo_mindmap.db is intentionally tracked)
+*.db.bak
+*.json
+*.json.bak
+*.json.migrated
+*.tmp
+
+# OS
+.DS_Store
