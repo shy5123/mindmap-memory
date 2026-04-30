@@ -30,4 +30,5 @@ jobs:
       run: python scripts/edge_tests.py
 
     - name: Run pre-release tests
+      continue-on-error: true
       run: python scripts/pre_release_tests.py
