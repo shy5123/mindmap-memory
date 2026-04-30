@@ -1,7 +1,7 @@
 ---
 name: mindmap-memory
 description: "记忆树（MemoryTree）— 一棵会新陈代谢的记忆树"
-version: 1.2.1
+version: 1.3.0
 author: Hermes Agent + User
 license: MIT
 metadata:
@@ -24,8 +24,9 @@ metadata:
 - **树形层级**：话题→子话题→...→叶子内容，最多 6 层
 - **自动分类**：新增记忆时自动语义匹配已有话题，找不到则新建
 - **智能检索**：逐层下钻，分数优先+最近访问优先
-- **遗忘机制**：每周衰减扫描，7天未访问 -1 分，分数归零自动删除
-- **核心保护**：可标记 `is_core=true`，永不被衰减删除
+- **遗忘机制**：每周衰减扫描，7天未访问 -1 分，分数 ≤2 沉入树根归档（不删除），3年未访问才淘汰
+- **核心保护**：可标记 `is_core=true`，分数不低于 3（确保永不下沉）
+- **树根深池**：两段记忆归档——活跃树正常新陈代谢，淘汰节点沉入树根永久归档；检索活跃树无结果时自动回退搜索树根，命中后重新生长枝叶恢复至活跃树
 - **迁移兼容**：首次运行自动将旧 MEMORY.md 迁移为树形结构
 - **遗忘日志**：删除的内容写入日志，可后悔恢复
 - **自动触发**：对话中自然提及记忆关键词时静默后台执行，无需手动命令
@@ -224,6 +225,17 @@ export MEMORYTREE_EMBEDDING_MODEL=local:BAAI/bge-small-zh-v1.5
    `load()` 读取这两个字段，`save()` 写入；旧 DB 自动 `ALTER TABLE` 补充列；
    `_log_decay` 调用处的 `actually_removed` 从 `n.id not in self.nodes` 改为 `n.deleted`。
    修复后 remove/decay 的软删除正确跨会话持久化，`recover` 可正常恢复。
+
+7. **新增字段检查清单** — 给 MemoryNode 加字段时，按此顺序：
+   ① `MemoryNode` dataclass 加字段（默认值）
+   ② `load()` CREATE TABLE schema 加列
+   ③ `load()` 后 `ALTER TABLE ADD COLUMN` 兜底（try/except OperationalError）
+   ④ `load()` MemoryNode 构造器读字段（`if "col" in row.keys() else default`）
+   ⑤ `save()` CREATE TABLE schema 同步加列
+   ⑥ `save()` INSERT 补参数（值个数对齐）
+   ⑦ `_count_non_core_nodes()` / `recall()` / `search()` 等过滤逻辑同步更新
+   ⑧ `stress_test.py` / `edge_tests.py` 测试预期同步
+   ⑨ `stats()` 和 `print_stats()` 加新统计项（如有需要）
 
 ## 文件结构
 
