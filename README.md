@@ -222,6 +222,7 @@ mindmap-memory/
 ├── mindmap_memory.py      # 核心引擎 (2494 行)
 ├── SKILL.md               # Hermes Skill 描述
 ├── README.md              # 项目文档
+├── CHANGELOG.md           # 更新日志
 ├── LICENSE                # MIT 开源许可证
 ├── CONTRIBUTING.md        # 贡献指南
 ├── SECURITY.md            # 安全策略
