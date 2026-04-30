@@ -797,8 +797,8 @@ class MindMapStore:
         return depth
 
     def _count_non_core_nodes(self) -> int:
-        """统计非核心节点总数。"""
-        return sum(1 for n in self.nodes.values() if not n.is_core and not n.deleted)
+        """统计非核心节点总数（排除已删除和树根节点）。"""
+        return sum(1 for n in self.nodes.values() if not n.is_core and not n.deleted and not n.is_deep)
 
     def _generate_topic_and_keywords(self, content: str) -> Tuple[str, List[str]]:
         """从记忆内容自动生成话题标题和关键词。
@@ -1834,12 +1834,20 @@ class MindMapStore:
 
             if days_since_access >= DECAY_INTERVAL_DAYS:
                 if node.is_core:
+                    # 核心记忆保护：不低于 CORE_MIN_SCORE
                     if node.score > CORE_MIN_SCORE:
                         old_score = node.score
                         node.score = max(CORE_MIN_SCORE, node.score - DECAY_AMOUNT)
                         logger.debug(
                             "核心节点 '%s' 衰减: %d → %d (保护下限: %d)",
                             node.topic, old_score, node.score, CORE_MIN_SCORE
+                        )
+                    elif node.score < CORE_MIN_SCORE:
+                        # 核心记忆分数异常低 → 恢复到保护值
+                        node.score = CORE_MIN_SCORE
+                        logger.debug(
+                            "核心节点 '%s' 分数恢复: %d → %d",
+                            node.topic, node.score - DECAY_AMOUNT, CORE_MIN_SCORE
                         )
                 else:
                     node.score -= DECAY_AMOUNT

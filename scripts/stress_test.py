@@ -346,6 +346,7 @@ class StressTest:
         # 手动降低分数并模拟衰减
         node.score = 2  # 设为低分
         node.last_access = (datetime.now() - timedelta(days=30)).isoformat()
+        self.store.last_decay = (datetime.now() - timedelta(days=100)).isoformat()
         self.store.save()
 
         # 执行衰减
@@ -409,11 +410,11 @@ class StressTest:
                 f"热记忆保留: {decay_store.nodes[nid].topic[:30]}",
             )
 
-        # 冷记忆 score=1 的应该被软删除
-        deleted_cold = sum(1 for nid in cold_ids 
-                          if nid in decay_store.nodes and decay_store.nodes[nid].deleted)
-        self.assert_greater(deleted_cold, 0, "冷记忆（score≤0）被遗忘删除",
-                            f"删除 {deleted_cold}/{len(cold_ids)} 条")
+        # 冷记忆应该沉入树根（is_deep=True），而非直接删除
+        sunk_cold = sum(1 for nid in cold_ids 
+                        if nid in decay_store.nodes and decay_store.nodes[nid].is_deep)
+        self.assert_greater(sunk_cold, 0, "冷记忆沉入树根",
+                            f"下沉 {sunk_cold}/{len(cold_ids)} 条")
 
         self.log(f"衰减删除: {len(removed)} 个节点")
         print()

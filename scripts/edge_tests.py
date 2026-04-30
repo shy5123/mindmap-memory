@@ -200,9 +200,9 @@ def test_04():
     json_nodes = len(store3.nodes)
     check(json_nodes == node_count, f"数据库节点数一致", f"DB={json_nodes}, 内存={node_count}")
 
-    # Check scores all initialized to 1
-    all_score_one = all(n.score == 1 for n in store.nodes.values())
-    check(all_score_one, "所有新节点 score=1")
+    # Check scores all initialized to NEW_NODE_SCORE
+    all_score_ok = all(n.score == NEW_NODE_SCORE for n in store.nodes.values())
+    check(all_score_ok, f"所有新节点 score={NEW_NODE_SCORE}")
 
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -382,11 +382,11 @@ def test_09():
 
         print(f"  {week:<4} {str(a_score):<16} {str(b_score):<16} {str(c_score):<16}")
 
-    # Verify A grew, C died
+    # Verify A grew, C sunk to tree root
     a_final = store.nodes[aid].score if aid in store.nodes else 0
-    c_alive = cid in store.nodes and not store.nodes[cid].deleted
+    c_sunk = cid in store.nodes and store.nodes[cid].is_deep
     check(a_final > 5, f"A持续涨分 (>{5})", f"实际={a_final}")
-    check(not c_alive, "C归零删除", f"{'已删' if not c_alive else f'仍存活 score={store.nodes[cid].score}'}")
+    check(c_sunk, "C沉入树根", f"{'已沉入' if c_sunk else f'仍活跃 score={store.nodes[cid].score}'}")
 
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -419,6 +419,8 @@ def test_10():
                 if node.is_core:
                     if node.score > CORE_MIN_SCORE:
                         node.score = max(CORE_MIN_SCORE, node.score - DECAY_AMOUNT)
+                    elif node.score < CORE_MIN_SCORE:
+                        node.score = CORE_MIN_SCORE
 
     final_score = store.nodes[nid].score
     alive = nid in store.nodes and not store.nodes[nid].deleted
