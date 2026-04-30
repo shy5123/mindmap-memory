@@ -73,15 +73,17 @@ logger = logging.getLogger("mindmap_memory")
 
 MAX_DEPTH = 6                    # 树的最大深度（根=第1层）
 MAX_NON_CORE_NODES = 10_000      # 非核心节点总数上限
-NEW_NODE_SCORE = 1               # 新建节点的初始分数
+NEW_NODE_SCORE = 2               # 新建节点的初始分数（≤2 将沉入树根）
 ACCESS_SCORE_INCREMENT = 1       # 每次访问加分
 PARENT_MAX_BONUS = 0.1           # 父节点加分上限
 DECAY_AMOUNT = 1                 # 每周衰减量
 DECAY_INTERVAL_DAYS = 7          # 衰减间隔（天）
-CORE_MIN_SCORE = 1               # 核心记忆最低分数
+CORE_MIN_SCORE = 3               # 核心记忆最低分数（>2 确保永不下沉）
 SHORT_TERM_MAX = 20              # 短期记忆上限
 LONG_TERM_MAX = 40               # 长期记忆上限（>40 为永久记忆）
 MATCH_THRESHOLD = 0.20           # 语义匹配最低相似度
+DEEP_MATCH_THRESHOLD = 0.10      # 树根关键词匹配阈值（无嵌入模型时）
+DEEP_RETENTION_DAYS = 1095       # 树根保留天数（3年）
 
 
 def _now_iso() -> str:
@@ -121,6 +123,7 @@ class MemoryNode:
     is_core: bool = False
     deleted: bool = False
     deleted_at: str = ""
+    is_deep: bool = False
 
     @property
     def is_leaf(self) -> bool:
@@ -618,15 +621,19 @@ class MindMapStore:
             conn.execute("""CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY, topic TEXT, content TEXT, score INTEGER DEFAULT 1,
                 last_access TEXT, parent_id TEXT, children_ids TEXT, is_core INTEGER DEFAULT 0,
-                deleted INTEGER DEFAULT 0, deleted_at TEXT DEFAULT ''
+                deleted INTEGER DEFAULT 0, deleted_at TEXT DEFAULT '', is_deep INTEGER DEFAULT 0
             )""")
-            # 向后兼容：旧 DB 缺少 deleted/deleted_at 列时自动补充
+            # 向后兼容：旧 DB 缺少列时自动补充
             try:
                 conn.execute("ALTER TABLE nodes ADD COLUMN deleted INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
             try:
                 conn.execute("ALTER TABLE nodes ADD COLUMN deleted_at TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE nodes ADD COLUMN is_deep INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
 
@@ -651,11 +658,12 @@ class MindMapStore:
                     is_core=bool(row["is_core"]),
                     deleted=bool(row["deleted"]) if "deleted" in row.keys() else False,
                     deleted_at=(row["deleted_at"] or "") if "deleted_at" in row.keys() else "",
+                    is_deep=bool(row["is_deep"]) if "is_deep" in row.keys() else False,
                 )
                 self.nodes[node.id] = node
 
             # 计算根节点
-            self.root_ids = [nid for nid, n in self.nodes.items() if n.is_root and not n.deleted]
+            self.root_ids = [nid for nid, n in self.nodes.items() if n.is_root and not n.deleted and not n.is_deep]
 
             conn.close()
 
@@ -730,7 +738,7 @@ class MindMapStore:
             conn.execute("""CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY, topic TEXT, content TEXT, score INTEGER DEFAULT 1,
                 last_access TEXT, parent_id TEXT, children_ids TEXT, is_core INTEGER DEFAULT 0,
-                deleted INTEGER DEFAULT 0, deleted_at TEXT DEFAULT ''
+                deleted INTEGER DEFAULT 0, deleted_at TEXT DEFAULT '', is_deep INTEGER DEFAULT 0
             )""")
 
             # 原子事务
@@ -744,13 +752,14 @@ class MindMapStore:
             conn.execute("DELETE FROM nodes")
             for node in self.nodes.values():
                 conn.execute(
-                    "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (node.id, node.topic, node.content, node.score,
                      node.last_access, node.parent_id,
                      json.dumps(node.children_ids, ensure_ascii=False),
                      1 if node.is_core else 0,
                      1 if node.deleted else 0,
-                     node.deleted_at)
+                     node.deleted_at,
+                     1 if node.is_deep else 0)
                 )
             conn.commit()
             conn.close()
@@ -1260,21 +1269,17 @@ class MindMapStore:
                 seen_ids.add(node.id)
                 unique_results.append(node)
 
-        # 按分数降序、最近访问降序排列
-        unique_results.sort(key=lambda n: (-n.score, n.last_access), reverse=True)
-        # score 高在前，last_access 新在前: (-n.score, n.last_access) 但 last_access 是字符串,
-        # 字符串比较 ISO 8601 格式可以直接比较
         unique_results.sort(key=lambda n: (-n.score, n.last_access))
 
         # 对匹配到的节点执行 +1 加分
         for node in unique_results:
             self._apply_access_bonus(node.id)
 
-        # 宽搜兜底：下钻结果 < 2 条时，批量匹配所有叶子
+        # 宽搜兜底：下钻结果 < 2 条时，批量匹配所有活跃叶子
         if len(unique_results) < 2:
             all_leaves = [
                 n for n in self.nodes.values()
-                if n.is_leaf and n.content and not n.deleted
+                if n.is_leaf and n.content and not n.deleted and not n.is_deep
                 and n.id not in seen_ids
             ]
             if all_leaves:
@@ -1286,8 +1291,52 @@ class MindMapStore:
                         unique_results.append(node)
                         self._apply_access_bonus(node.id)
 
+        # 树根回退：活跃树无结果时，搜索深池
+        if not unique_results:
+            deep_hits = self._search_deep(query)
+            unique_results.extend(deep_hits)
+
         self.save()
         return unique_results
+
+    def _search_deep(self, query: str) -> List[MemoryNode]:
+        """搜索树根深池（is_deep=True 的节点）。
+
+        无嵌入模型时使用更宽松的阈值（DEEP_MATCH_THRESHOLD）。
+        命中后自动恢复：is_deep=False，score 恢复为可访问状态。
+        """
+        deep_nodes = [
+            n for n in self.nodes.values()
+            if n.is_deep and not n.deleted and n.content
+        ]
+        if not deep_nodes:
+            return []
+
+        # 检查是否有嵌入模型（通过 matcher 类型判断）
+        has_embedding = not isinstance(self.matcher, KeywordModel)
+
+        threshold = MATCH_THRESHOLD if has_embedding else DEEP_MATCH_THRESHOLD
+
+        node_texts = [n.content for n in deep_nodes]
+        sims = self.matcher.batch_similarity(query, node_texts)
+
+        hits = []
+        for node, sim in zip(deep_nodes, sims):
+            if sim >= threshold:
+                # 命中！重新生长枝叶——恢复到活跃树
+                node.is_deep = False
+                node.score = NEW_NODE_SCORE + ACCESS_SCORE_INCREMENT
+                node.last_access = _now_iso()
+                hits.append(node)
+                logger.info(
+                    "树根命中！'%s' 重新生长枝叶 (sim=%.3f)",
+                    node.topic, sim
+                )
+
+        if hits:
+            logger.info("树根检索命中 %d 条记忆，已恢复至活跃树", len(hits))
+
+        return hits
 
     def _search_at_level(
         self,
@@ -1748,14 +1797,12 @@ class MindMapStore:
     def decay_if_needed(self) -> List[MemoryNode]:
         """如果需要，执行衰减扫描。
 
-        通常在对话启动时调用，确保记忆系统保持整洁。
-
         衰减规则:
           - 遍历所有节点
           - 如果 last_access 距今 > 7 天，score -= 1
-          - 核心记忆 score 不低于 CORE_MIN_SCORE (1)
-          - score <= 0: 级联删除该节点及所有子节点
-          - 记录删除日志
+          - 核心记忆 score 不低于 CORE_MIN_SCORE (3)
+          - score <= 2 且非核心: 沉入树根（is_deep=True），不删除
+          - 树根节点超过 DEEP_RETENTION_DAYS 天未访问: 软删除
 
         Returns:
             被删除的节点列表
@@ -1766,28 +1813,27 @@ class MindMapStore:
 
         logger.info("开始每周衰减扫描...")
         removed = []
+        sunk_count = 0
 
         now = datetime.now()
         cutoff = now - timedelta(days=DECAY_INTERVAL_DAYS)
 
-        # 收集需要衰减/删除的节点
-        to_remove = []
-
+        # 第一阶段：活跃树衰减 + 下沉
         for node_id, node in list(self.nodes.items()):
+            if node.deleted or node.is_deep:
+                continue  # 跳过软删除和已在树根的节点
+
             try:
                 last_access = datetime.fromisoformat(
                     node.last_access.replace("Z", "+00:00")
                 ).replace(tzinfo=None)
             except (ValueError, TypeError):
-                # 无法解析时间戳，跳过
                 continue
 
             days_since_access = (now - last_access).days
 
             if days_since_access >= DECAY_INTERVAL_DAYS:
-                # 整周未访问 → 衰减
                 if node.is_core:
-                    # 核心记忆保护
                     if node.score > CORE_MIN_SCORE:
                         old_score = node.score
                         node.score = max(CORE_MIN_SCORE, node.score - DECAY_AMOUNT)
@@ -1802,32 +1848,62 @@ class MindMapStore:
                         node.topic, node.score, days_since_access
                     )
 
-                    if node.score <= 0:
-                        to_remove.append(node_id)
+                    # score ≤ 2 → 沉入树根（不删除，归档）
+                    if node.score <= 2:
+                        node.is_deep = True
+                        sunk_count += 1
+                        logger.info(
+                            "节点 '%s' 沉入树根 (score=%d, 距上次访问 %d 天)",
+                            node.topic, node.score, days_since_access
+                        )
 
-        # 级联删除 score ≤ 0 的节点
-        for node_id in to_remove:
-            if node_id not in self.nodes:
+        # 第二阶段：树根时间淘汰（超过 DEEP_RETENTION_DAYS 天）
+        deep_cutoff = now - timedelta(days=DEEP_RETENTION_DAYS)
+        to_remove = []
+
+        for node_id, node in list(self.nodes.items()):
+            if not node.is_deep or node.deleted:
                 continue
-            node = self.nodes[node_id]
-            # 收集整棵子树用于记录日志（删除前快照）
-            subtree_before = self.get_subtree(node_id)
-            self._remove_node_cascade(node_id)
-            # 过滤：只保留真正被软删除的节点（核心记忆子节点可能被提升而非删除）
-            actually_removed = [n for n in subtree_before if n.deleted]
-            removed.extend(actually_removed)
-            logger.info(
-                "遗忘节点 '%s' (score=%d, 类别=%s) 及其 %d 个子节点",
-                node.topic, node.score, node.score_category(),
-                len(actually_removed) - 1
-            )
+            try:
+                last_access = datetime.fromisoformat(
+                    node.last_access.replace("Z", "+00:00")
+                ).replace(tzinfo=None)
+            except (ValueError, TypeError):
+                continue
 
-        # 记录遗忘日志
+            if last_access < deep_cutoff:
+                to_remove.append(node_id)
+
+        # 按天分组淘汰（最早的一天先删）
+        if to_remove:
+            to_remove.sort(key=lambda nid: self.nodes[nid].last_access)
+            # 每次最多清理一天的节点
+            first_day = self.nodes[to_remove[0]].last_access[:10] if to_remove else ""
+            day_nodes = [nid for nid in to_remove if self.nodes[nid].last_access[:10] == first_day]
+
+            for node_id in day_nodes:
+                if node_id not in self.nodes:
+                    continue
+                node = self.nodes[node_id]
+                subtree_before = self.get_subtree(node_id)
+                self._remove_node_cascade(node_id)
+                actually_removed = [n for n in subtree_before if n.deleted]
+                removed.extend(actually_removed)
+                logger.info(
+                    "树根淘汰节点 '%s' (归档 %d 天) 及其 %d 个子节点",
+                    node.topic,
+                    (now - last_access).days if 'last_access' in dir() else 0,
+                    len(actually_removed) - 1
+                )
+
+        # 记录日志
+        if sunk_count:
+            logger.info("本轮共 %d 个节点沉入树根", sunk_count)
         if removed:
-            self._log_decay(removed, "每周衰减")
-            logger.info("本轮衰减共删除 %d 个节点", len(removed))
-        else:
-            logger.info("衰减扫描完成，无需删除任何节点")
+            self._log_decay(removed, "树根时间淘汰")
+            logger.info("树根淘汰共删除 %d 个节点", len(removed))
+        elif not sunk_count:
+            logger.info("衰减扫描完成，无需操作")
 
         self.last_decay = now.isoformat()
         self.save()
@@ -2201,9 +2277,12 @@ class MindMapStore:
         leaf_count = sum(1 for n in self.nodes.values() if n.is_leaf)
 
         deleted_count = sum(1 for n in self.nodes.values() if n.deleted)
+        deep_count = sum(1 for n in self.nodes.values() if n.is_deep and not n.deleted)
         return {
             "节点总数": total,
+            "活跃节点": total - deleted_count - deep_count,
             "已删除(可恢复)": deleted_count,
+            "树根归档": deep_count,
             "根话题数": len(self.root_ids),
             "核心记忆": core_count,
             "非核心节点": non_core,
