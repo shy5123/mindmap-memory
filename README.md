@@ -1,5 +1,8 @@
 # 记忆树 MemoryTree
 
+[![Tests](https://github.com/shy5123/mindmap-memory/actions/workflows/test.yml/badge.svg)](https://github.com/shy5123/mindmap-memory/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **一棵会新陈代谢的记忆树**
 
 让 AI 的记忆不再是无限膨胀的仓库，而是一片有呼吸、会修剪的森林。

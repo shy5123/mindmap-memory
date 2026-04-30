@@ -1,13 +1,26 @@
 # Python
 __pycache__/
 *.pyc
+*.py[cod]
 
-# Runtime data (demo_mindmap.db is intentionally tracked)
+# Memory data (user privacy — do not commit)
+mindmap.json
+mindmap.db
 *.db.bak
-*.json
+!demo_mindmap.db
+
+# Decay logs (user privacy)
+decay_log/
+
+# Backup files
+*.bak
 *.json.bak
 *.json.migrated
 *.tmp
 
+# Environment (may contain API keys)
+.env
+
 # OS
 .DS_Store
+Thumbs.db
