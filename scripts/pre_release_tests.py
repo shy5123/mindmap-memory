@@ -69,9 +69,9 @@ def test_transaction_rollback():
     # 1b: 直接操作 SQLite — 开始事务 → 写入节点B → 不commit关闭
     conn = _open_db(db_path)
     conn.execute("BEGIN")
-    conn.execute("INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?)",
+    conn.execute("INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                  ("b-node-id", "节点B话题", "节点B：模拟崩溃中写入的内容",
-                  1, "2026-01-01T00:00:00", None, "[]", 0, 0, ""))
+                  1, "2026-01-01T00:00:00", None, "[]", 0, 0, "", 0, ""))
     # 模拟崩溃：关闭连接但不 commit
     conn.close()  # 无 commit → 自动回滚
 
@@ -88,9 +88,9 @@ def test_transaction_rollback():
     conn2.execute("BEGIN")
     # 先删再写一半
     conn2.execute("DELETE FROM nodes")
-    conn2.execute("INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?)",
+    conn2.execute("INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                   ("c-node-id", "节点C", "节点C：半途崩溃", 1,
-                   "2026-01-01T00:00:00", None, "[]", 0, 0, ""))
+                   "2026-01-01T00:00:00", None, "[]", 0, 0, "", 0, ""))
     # 节点D 还来不及写就崩溃了
     conn2.close()  # 回滚 → 节点A 应该还活着
 
