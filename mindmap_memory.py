@@ -32,6 +32,7 @@ import sys
 import time
 import uuid
 import difflib
+import hashlib
 import logging
 import sqlite3
 import tempfile
@@ -280,6 +281,211 @@ class SemanticMatcher:
         # 综合分数（关键词匹配权重高，因为中文场景更有效）
         return 0.5 * overlap + 0.5 * seq_sim
 
+    # ------------------------------------------------------------------
+    # BM25 稀疏检索（纯 Python 实现，零外部依赖）
+    # ------------------------------------------------------------------
+
+    # BM25 超参数（与学术界标准一致）
+    BM25_K1 = 1.5   # 词频饱和度控制
+    BM25_B = 0.75   # 文档长度归一化
+
+    @staticmethod
+    def _tokenize(text: str) -> List[str]:
+        """将文本切分为词条（复用 extract_keywords 的词条提取逻辑）。"""
+        return SemanticMatcher.extract_keywords(text)
+
+    @staticmethod
+    def _bm25_score_single(
+        query_tokens: List[str],
+        doc_tokens: List[str],
+        idf: Dict[str, float],
+        avgdl: float,
+    ) -> float:
+        """对单个文档计算 BM25 分数。
+
+        Args:
+            query_tokens: 查询词条列表
+            doc_tokens: 文档词条列表
+            idf: 预计算的 IDF 字典 {term: idf_value}
+            avgdl: 平均文档长度
+
+        Returns:
+            BM25 分数（非归一化，可用于排序）
+        """
+        if not query_tokens or not doc_tokens:
+            return 0.0
+
+        from collections import Counter
+        doc_len = len(doc_tokens)
+        tf = Counter(doc_tokens)
+        k1 = SemanticMatcher.BM25_K1
+        b = SemanticMatcher.BM25_B
+
+        score = 0.0
+        for token in set(query_tokens):
+            if token not in idf:
+                continue
+            f = tf.get(token, 0)
+            if f == 0:
+                continue
+            # BM25 term weight
+            numerator = f * (k1 + 1.0)
+            denominator = f + k1 * (1.0 - b + b * doc_len / avgdl) if avgdl > 0 else f + k1
+            score += idf[token] * numerator / denominator
+
+        return score
+
+    @classmethod
+    def bm25_search(
+        cls,
+        query: str,
+        candidates: List[str],
+    ) -> List[float]:
+        """BM25 稀疏检索：对查询与候选文档列表计算 BM25 分数。
+
+        基于标准 BM25 公式（Robertson et al., 1995），纯 Python 实现。
+        在 corpus 上构建倒排索引和 IDF，然后对每个候选文档打分。
+
+        Args:
+            query: 查询文本
+            candidates: 候选文档文本列表
+
+        Returns:
+            与 candidates 等长的 BM25 分数列表
+        """
+        import math
+        from collections import Counter
+
+        if not candidates:
+            return []
+
+        # 构建语料统计
+        doc_tokens_list = [cls._tokenize(doc) for doc in candidates]
+        query_tokens = cls._tokenize(query)
+
+        if not query_tokens:
+            return [0.0] * len(candidates)
+
+        N = len(doc_tokens_list)
+        doc_lengths = [len(dt) for dt in doc_tokens_list]
+        avgdl = sum(doc_lengths) / N if N > 0 else 1.0
+
+        # 计算 DF（文档频率）和 IDF
+        df: Dict[str, int] = {}
+        for dt in doc_tokens_list:
+            for token in set(dt):
+                df[token] = df.get(token, 0) + 1
+
+        idf: Dict[str, float] = {}
+        for token, freq in df.items():
+            # IDF 平滑公式（与学术界实现一致）
+            idf[token] = math.log((N - freq + 0.5) / (freq + 0.5) + 1.0)
+
+        # 对每个候选文档计算 BM25 分数
+        scores = []
+        for doc_tokens in doc_tokens_list:
+            s = cls._bm25_score_single(query_tokens, doc_tokens, idf, avgdl)
+            scores.append(s)
+
+        return scores
+
+    # ------------------------------------------------------------------
+    # RRF 融合排序（Reciprocal Rank Fusion）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def rrf_fusion(
+        score_sets: List[List[float]],
+        k: int = 60,
+    ) -> List[float]:
+        """将多组分数通过 RRF 融合为单一排序分数。
+
+        对每组分数独立排序（降序），然后对每个候选项计算 RRF：
+            RRF_score(i) = Σ 1 / (k + rank_j(i))
+        其中 rank_j(i) 是候选项 i 在第 j 组排序中的排名（从 1 开始）。
+
+        Args:
+            score_sets: 多组分数列表，每组与候选项一一对应
+            k: RRF 常数（默认 60，与学术界一致）
+
+        Returns:
+            融合后的 RRF 分数列表（长度等于各组候选数）
+        """
+        if not score_sets:
+            return []
+
+        n_candidates = len(score_sets[0])
+        if n_candidates == 0:
+            return []
+
+        # 对每组分数计算排名（降序，分数相同取平均排名）
+        ranks_list: List[List[float]] = []
+        for scores in score_sets:
+            # 创建 (index, score) 对，按 score 降序排列
+            indexed = list(enumerate(scores))
+            indexed.sort(key=lambda x: x[1], reverse=True)
+
+            ranks = [0.0] * n_candidates
+            i = 0
+            while i < n_candidates:
+                # 处理相同分数：取平均排名
+                j = i
+                while j < n_candidates and indexed[j][1] == indexed[i][1]:
+                    j += 1
+                avg_rank = (i + 1 + j) / 2.0  # 1-indexed 平均排名
+                for m in range(i, j):
+                    ranks[indexed[m][0]] = avg_rank
+                i = j
+            ranks_list.append(ranks)
+
+        # RRF 融合：对每个候选项求和
+        rrf_scores = [0.0] * n_candidates
+        for ranks in ranks_list:
+            for i in range(n_candidates):
+                rrf_scores[i] += 1.0 / (k + ranks[i])
+
+        return rrf_scores
+
+    @classmethod
+    def hybrid_search(
+        cls,
+        query: str,
+        candidates: List[str],
+        rrf_k: int = 60,
+    ) -> List[Tuple[int, float]]:
+        """混合搜索：BM25 稀疏检索 + 关键词/余弦相似度，通过 RRF 融合排序。
+
+        综合两种检索信号：
+          1. BM25 稀疏检索 — 捕获精确关键词匹配
+          2. 语义相似度   — 捕获同义/相关语义
+
+        通过 RRF 融合两组排名，得到最终排序。
+
+        Args:
+            query: 查询文本
+            candidates: 候选文档文本列表
+            rrf_k: RRF 常数（默认 60）
+
+        Returns:
+            [(候选项索引, RRF融合分数), ...] 按分数降序排列
+        """
+        if not candidates:
+            return []
+
+        # 第一路：BM25 稀疏检索
+        bm25_scores = cls.bm25_search(query, candidates)
+
+        # 第二路：语义相似度（关键词重叠 + 编辑距离）
+        keyword_scores = [cls.similarity(query, c) for c in candidates]
+
+        # RRF 融合
+        fused = cls.rrf_fusion([bm25_scores, keyword_scores], k=rrf_k)
+
+        # 构建排序结果
+        result = [(i, fused[i]) for i in range(len(fused))]
+        result.sort(key=lambda x: x[1], reverse=True)
+        return result
+
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -305,6 +511,19 @@ class SemanticModel:
     def batch_similarity(self, query: str, candidates: list[str]) -> list[float]:
         """批量计算相似度。默认逐个调用 similarity()，子类可重写为批量编码。"""
         return [self.similarity(query, c) for c in candidates]
+
+    def hybrid_search(
+        self, query: str, candidates: list[str], rrf_k: int = 60
+    ) -> list[tuple]:
+        """混合搜索：BM25 + 语义相似度 + RRF 融合。
+        
+        默认实现使用 SemanticMatcher.hybrid_search。
+        子类可重写为使用嵌入向量的混合搜索。
+        
+        Returns:
+            [(index, rrf_score), ...] 按分数降序排列
+        """
+        return SemanticMatcher.hybrid_search(query, candidates, rrf_k=rrf_k)
 
     def health_status(self) -> str:
         """返回健康状态字符串。默认实现始终健康。"""
@@ -577,6 +796,11 @@ class MindMapStore:
         self.classify_matcher: SemanticModel = (
             _get_matcher() if _cls_cfg == "embedding" else KeywordModel()
         )
+        # 内容哈希去重：SHA-256 哈希集合 + 计数器
+        self._content_hashes: set = set()
+        self._duplicates_skipped: int = 0
+        # 混合搜索使用次数
+        self._hybrid_search_count: int = 0
 
     # ------------------------------------------------------------------
     # 持久化 — 原子读写
@@ -650,6 +874,8 @@ class MindMapStore:
                     self.last_decay = row["value"]
                 elif row["key"] == "last_consolidate":
                     self.last_consolidate = row["value"]
+                elif row["key"] == "duplicates_skipped":
+                    self._duplicates_skipped = int(row["value"])
 
             # 加载节点
             self.nodes = {}
@@ -670,6 +896,12 @@ class MindMapStore:
 
             # 计算根节点
             self.root_ids = [nid for nid, n in self.nodes.items() if n.is_root and not n.deleted and not n.is_deep]
+
+            # 从已有节点重建内容哈希集合
+            self._content_hashes = set()
+            for n in self.nodes.values():
+                if n.content and not n.deleted:
+                    self._content_hashes.add(hashlib.sha256(n.content.encode("utf-8")).hexdigest())
 
             conn.close()
 
@@ -755,6 +987,8 @@ class MindMapStore:
                 conn.execute("INSERT INTO meta VALUES (?, ?)", ("last_decay", self.last_decay))
             if self.last_consolidate:
                 conn.execute("INSERT INTO meta VALUES (?, ?)", ("last_consolidate", self.last_consolidate))
+            if self._duplicates_skipped:
+                conn.execute("INSERT INTO meta VALUES (?, ?)", ("duplicates_skipped", str(self._duplicates_skipped)))
             conn.execute("DELETE FROM nodes")
             for node in self.nodes.values():
                 conn.execute(
@@ -908,6 +1142,11 @@ class MindMapStore:
                 else:
                     parent.content = content
                 parent.last_access = _now_iso()
+                # 哈希去重：注册合并后的内容哈希
+                if content:
+                    self._content_hashes.add(hashlib.sha256(content.encode("utf-8")).hexdigest())
+                if parent.content:
+                    self._content_hashes.add(hashlib.sha256(parent.content.encode("utf-8")).hexdigest())
                 if not self.save():
                     logger.error("保存失败（可能磁盘满或权限不足），已回退")
                     return ""
@@ -962,6 +1201,9 @@ class MindMapStore:
                 self.root_ids.remove(node.id)
             self.nodes.pop(node.id, None)
             return ""
+        # 哈希去重：成功添加后注册内容哈希
+        if content:
+            self._content_hashes.add(hashlib.sha256(content.encode("utf-8")).hexdigest())
         logger.info("已添加节点 '%s' (id=%s, 深度=%d)", topic, node.id[:8], self._get_depth(node.id))
         return node.id
 
@@ -1120,6 +1362,13 @@ class MindMapStore:
             return ""
 
         content = content.strip()
+
+        # 内容哈希去重：相同 SHA-256 哈希跳过（已有相同内容不再重复添加）
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if content_hash in self._content_hashes:
+            self._duplicates_skipped += 1
+            logger.debug("跳过重复内容 (sha256=%s...): %s", content_hash[:16], content[:80])
+            return ""
 
         # 智能提取话题和关键词
         auto_topic, keywords = self._generate_topic_and_keywords(content)
@@ -1283,7 +1532,7 @@ class MindMapStore:
         for node in unique_results:
             self._apply_access_bonus(node.id)
 
-        # 宽搜兜底：下钻结果 < 2 条时，批量匹配所有活跃叶子
+        # 宽搜兜底：下钻结果 < 2 条时，混合搜索匹配所有活跃叶子
         if len(unique_results) < 2:
             all_leaves = [
                 n for n in self.nodes.values()
@@ -1292,12 +1541,15 @@ class MindMapStore:
             ]
             if all_leaves:
                 leaf_texts = [n.content for n in all_leaves]
-                sims = self.matcher.batch_similarity(query, leaf_texts)
-                for node, sim in zip(all_leaves, sims):
-                    if sim >= MATCH_THRESHOLD and node.id not in seen_ids:
-                        seen_ids.add(node.id)
-                        unique_results.append(node)
-                        self._apply_access_bonus(node.id)
+                # 使用混合搜索（BM25 + 语义相似度 + RRF 融合）
+                hybrid_results = self.matcher.hybrid_search(query, leaf_texts)
+                self._hybrid_search_count += 1
+                # RRF 分数阈值：正值表示至少在一个排序中命中
+                for idx, rrf_score in hybrid_results:
+                    if rrf_score > 0 and all_leaves[idx].id not in seen_ids:
+                        seen_ids.add(all_leaves[idx].id)
+                        unique_results.append(all_leaves[idx])
+                        self._apply_access_bonus(all_leaves[idx].id)
 
         # 树根回退：活跃树无结果时，搜索深池
         if not unique_results:
@@ -2312,6 +2564,9 @@ class MindMapStore:
             "深度限制": MAX_DEPTH,
             "上次衰减": self.last_decay or "未执行",
             "上次守护": self.last_consolidate or "未执行",
+            "跳过重复(哈希去重)": self._duplicates_skipped,
+            "内存哈希数": len(self._content_hashes),
+            "混合搜索使用次数": self._hybrid_search_count,
         }
 
     def print_stats(self) -> None:

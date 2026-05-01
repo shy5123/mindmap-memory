@@ -1,7 +1,7 @@
 ---
 name: mindmap-memory
 description: "记忆树（MemoryTree）— 一棵会新陈代谢的记忆树"
-version: 1.4.0
+version: 1.5.0
 author: Hermes Agent + User
 license: MIT
 metadata:
@@ -44,6 +44,8 @@ metadata:
 - **时间戳记录**：每个记忆节点自动记录 `created_at`（ISO 8601 创建时间），SQLite 已加列，向后兼容旧数据库
 - **JSON 输出**：所有 CLI 命令支持 `--json` 参数，输出纯净 JSON（无图标、无中文），适合程序消费
 - **自动安装引导**：`setup-embeddings` 命令自动下载配置 BGE 嵌入模型（pip install + huggingface-hub + curl 降级）
+- **混合搜索**：BM25 稀疏检索 + 关键词/余弦相似度，通过 RRF（Reciprocal Rank Fusion）融合排序，纯 Python 实现零外部依赖
+- **内容哈希去重**：每次 `add_memory` 前计算 SHA-256 哈希，相同内容自动跳过不重复添加；统计信息展示"跳过重复"、"内存哈希数"和"混合搜索使用次数"
 
 ## 分数区间
 
