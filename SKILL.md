@@ -1,7 +1,7 @@
 ---
 name: mindmap-memory
 description: "记忆树（MemoryTree）— 一棵会新陈代谢的记忆树"
-version: 1.3.0
+version: 1.4.0
 author: Hermes Agent + User
 license: MIT
 metadata:
@@ -41,6 +41,9 @@ metadata:
 - **宽搜兜底**：逐层下钻不足时自动切换到全叶子节点批量匹配，避免路径依赖导致漏检
 - **健康检查**：嵌入模型暴露 `health_status()` 和 `healthy` 属性，加载失败静默降级为关键词匹配
 - **完整测试体系**：26 项压力测试（`scripts/stress_test.py`）+ 12 项边界值测试（`scripts/edge_tests.py`），覆盖批量写入、事务回滚、衰减准确性、节点上限淘汰、SQL 注入防护等
+- **时间戳记录**：每个记忆节点自动记录 `created_at`（ISO 8601 创建时间），SQLite 已加列，向后兼容旧数据库
+- **JSON 输出**：所有 CLI 命令支持 `--json` 参数，输出纯净 JSON（无图标、无中文），适合程序消费
+- **自动安装引导**：`setup-embeddings` 命令自动下载配置 BGE 嵌入模型（pip install + huggingface-hub + curl 降级）
 
 ## 分数区间
 
@@ -112,6 +115,7 @@ python3 mindmap_memory.py sync             # 从 MEMORY.md 增量导入
 python3 mindmap_memory.py recall           # 查看完整记忆树
 python3 mindmap_memory.py decay            # 手动触发衰减
 python3 mindmap_memory.py consolidate      # 记忆守护：用嵌入模型重分类
+python3 mindmap_memory.py setup-embeddings  # 自动安装引导 BGE 嵌入模型
 python3 mindmap_memory.py migrate          # 迁移旧记忆
 python3 mindmap_memory.py core <id>        # 切换核心记忆标记
 python3 mindmap_memory.py stats            # 统计信息
@@ -209,9 +213,13 @@ export MEMORYTREE_EMBEDDING_MODEL=local:BAAI/bge-small-zh-v1.5
    `/skill` 会被前缀匹配到 `/skills`（hub管理），然后 `mindmap-memory` 被当成子命令报 "Unknown action"。
    所有文档、CLI 帮助、注释里的引用必须用 `/mindmap-memory`。
 
-3. **修改 MemoryTree 时自动同步更新 README.md 和 SKILL.md** —
-   新增功能、修改命令、变更设计决策后，主动更新两个文档。
-   用户说过"今天不再赘述"→ 以后每次改代码后自动更新文档，不用等提醒。
+3. **发布后文档同步审计清单** — 功能改动后，逐项检查：
+   ① `README.md` — 核心特性、已知局限、文件结构列表、行数
+   ② `SKILL.md` — 同上
+   ③ `CHANGELOG.md` — 必须有新版本条目
+   ④ 三个文档中的机制描述是否过时（如"软删除"改为"树根归档"）
+   ⑤ 文件结构列表与实际 `find . -type f` 输出一致
+   用户说过"今天不再赘述"→ 以后每次改代码后主动同步所有文档，不用等提醒。
 
 4. **原生工具注册位置**: `~/.hermes/hermes-agent/tools/memory_tree_tool.py`，
    通过 `registry.register()` 注册，toolset 名为 `"memorytree"`（不能叫 `"memory"`——会和 toolsets.py 静态定义冲突导致工具不可见），
@@ -236,6 +244,12 @@ export MEMORYTREE_EMBEDDING_MODEL=local:BAAI/bge-small-zh-v1.5
    ⑦ `_count_non_core_nodes()` / `recall()` / `search()` 等过滤逻辑同步更新
    ⑧ `stress_test.py` / `edge_tests.py` 测试预期同步
    ⑨ `stats()` 和 `print_stats()` 加新统计项（如有需要）
+
+   > **v1.4.0 示例** — 已按上述清单添加 `created_at`（ISO 8601 时间戳）字段：
+   > ① `MemoryNode.created_at: Optional[str] = None`；
+   > ②③ SQLite schema 加 `created_at TEXT DEFAULT ''` + `ALTER TABLE` 兜底；
+   > ④⑤ `load()`/`save()` 读写同步；
+   > ⑥ `INSERT` 补参数；⑦⑧⑨ 未涉及过滤逻辑变更，跳过。
 
 ## 文件结构
 

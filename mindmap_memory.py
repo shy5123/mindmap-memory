@@ -123,6 +123,7 @@ class MemoryNode:
     is_core: bool = False
     deleted: bool = False
     deleted_at: str = ""
+    created_at: str = ""
     is_deep: bool = False
 
     @property
@@ -621,7 +622,7 @@ class MindMapStore:
             conn.execute("""CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY, topic TEXT, content TEXT, score INTEGER DEFAULT 1,
                 last_access TEXT, parent_id TEXT, children_ids TEXT, is_core INTEGER DEFAULT 0,
-                deleted INTEGER DEFAULT 0, deleted_at TEXT DEFAULT '', is_deep INTEGER DEFAULT 0
+                deleted INTEGER DEFAULT 0, deleted_at TEXT DEFAULT '', is_deep INTEGER DEFAULT 0, created_at TEXT DEFAULT ''
             )""")
             # 向后兼容：旧 DB 缺少列时自动补充
             try:
@@ -634,6 +635,10 @@ class MindMapStore:
                 pass
             try:
                 conn.execute("ALTER TABLE nodes ADD COLUMN is_deep INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE nodes ADD COLUMN created_at TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
 
@@ -659,6 +664,7 @@ class MindMapStore:
                     deleted=bool(row["deleted"]) if "deleted" in row.keys() else False,
                     deleted_at=(row["deleted_at"] or "") if "deleted_at" in row.keys() else "",
                     is_deep=bool(row["is_deep"]) if "is_deep" in row.keys() else False,
+                    created_at=(row["created_at"] or "") if "created_at" in row.keys() else "",
                 )
                 self.nodes[node.id] = node
 
@@ -738,7 +744,7 @@ class MindMapStore:
             conn.execute("""CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY, topic TEXT, content TEXT, score INTEGER DEFAULT 1,
                 last_access TEXT, parent_id TEXT, children_ids TEXT, is_core INTEGER DEFAULT 0,
-                deleted INTEGER DEFAULT 0, deleted_at TEXT DEFAULT '', is_deep INTEGER DEFAULT 0
+                deleted INTEGER DEFAULT 0, deleted_at TEXT DEFAULT '', is_deep INTEGER DEFAULT 0, created_at TEXT DEFAULT ''
             )""")
 
             # 原子事务
@@ -752,14 +758,15 @@ class MindMapStore:
             conn.execute("DELETE FROM nodes")
             for node in self.nodes.values():
                 conn.execute(
-                    "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (node.id, node.topic, node.content, node.score,
                      node.last_access, node.parent_id,
                      json.dumps(node.children_ids, ensure_ascii=False),
                      1 if node.is_core else 0,
                      1 if node.deleted else 0,
                      node.deleted_at,
-                     1 if node.is_deep else 0)
+                     1 if node.is_deep else 0,
+                     node.created_at)
                 )
             conn.commit()
             conn.close()
@@ -932,6 +939,7 @@ class MindMapStore:
             topic=topic,
             content=content,
             parent_id=parent_id,
+            created_at=_now_iso(),
         )
 
         self.nodes[node.id] = node
@@ -2315,6 +2323,176 @@ class MindMapStore:
             print(f"  {key}: {value}")
         print()
 
+    def setup_embeddings(self) -> None:
+        """自动下载并配置 BGE 嵌入模型。"""
+        import subprocess
+        import shutil
+
+        MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+        CACHE_DIR = os.path.expanduser(f"~/.cache/hermes/embeddings/{MODEL_NAME}")
+        MODEL_FILES = [
+            "config.json",
+            "model.safetensors",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "sentence_bert_config.json",
+            "modules.json",
+            "1_Pooling/config.json",
+        ]
+
+        print("🔧 记忆树嵌入模型安装向导")
+        print("═" * 40)
+        print(f"  模型: {MODEL_NAME}")
+        print(f"  用途: 中文语义匹配（提高记忆检索精度）")
+        print(f"  大小: ~100MB")
+        print()
+
+        # 步骤 1: 检查 Python 版本
+        print("📋 步骤 1/6: 检查 Python 版本...")
+        py_ver = sys.version_info
+        if py_ver < (3, 8):
+            print(f"   ❌ Python {py_ver.major}.{py_ver.minor} 不满足要求（需要 3.8+）")
+            return
+        print(f"   ✅ Python {py_ver.major}.{py_ver.minor}.{py_ver.micro} — 满足要求")
+        print()
+
+        # 步骤 2: 安装 sentence-transformers
+        print("📦 步骤 2/6: 安装 sentence-transformers...")
+        try:
+            import sentence_transformers  # noqa: F401
+            print("   ✅ sentence-transformers 已安装")
+        except ImportError:
+            print("   🔄 正在安装 sentence-transformers（可能需要几分钟）...")
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "--quiet", "sentence-transformers"],
+                    stdout=sys.stdout, stderr=sys.stderr
+                )
+                print("   ✅ sentence-transformers 安装完成")
+            except subprocess.CalledProcessError as e:
+                print(f"   ❌ 安装失败: {e}")
+                print("   请手动运行: pip install sentence-transformers")
+                return
+        print()
+
+        # 步骤 3: 创建模型目录
+        print("📁 步骤 3/6: 创建模型目录...")
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        print(f"   ✅ 目录已就绪: {CACHE_DIR}")
+        print()
+
+        # 步骤 4: 下载模型文件
+        print("🔄 步骤 4/6: 下载模型文件...")
+        all_exist = True
+        for fname in MODEL_FILES:
+            fpath = os.path.join(CACHE_DIR, fname)
+            if os.path.exists(fpath):
+                continue
+            all_exist = False
+            break
+
+        if all_exist:
+            print("   ✅ 模型文件已存在，跳过下载")
+        else:
+            # 尝试使用 huggingface_hub
+            use_hub = False
+            try:
+                from huggingface_hub import snapshot_download  # noqa: F401
+                use_hub = True
+            except ImportError:
+                print("   📦 安装 huggingface-hub...")
+                try:
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", "--quiet", "huggingface-hub"],
+                        stdout=sys.stdout, stderr=sys.stderr
+                    )
+                    use_hub = True
+                except subprocess.CalledProcessError:
+                    use_hub = False
+
+            if use_hub:
+                print("   🔄 使用 huggingface-hub 下载模型...")
+                try:
+                    from huggingface_hub import snapshot_download
+                    snapshot_download(
+                        repo_id=MODEL_NAME,
+                        local_dir=CACHE_DIR,
+                        local_dir_use_symlinks=False,
+                    )
+                    print("   ✅ 模型下载完成")
+                except Exception as e:
+                    print(f"   ⚠️  huggingface-hub 下载失败: {e}")
+                    use_hub = False
+
+            if not use_hub:
+                # 优雅降级: 使用 curl
+                print("   🔄 使用 curl 下载模型文件（优雅降级）...")
+                base_url = f"https://huggingface.co/{MODEL_NAME}/resolve/main"
+                for fname in MODEL_FILES:
+                    fpath = os.path.join(CACHE_DIR, fname)
+                    if os.path.exists(fpath):
+                        print(f"   ✅ {fname} 已存在")
+                        continue
+                    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+                    url = f"{base_url}/{fname}"
+                    print(f"   ⬇️  下载 {fname}...")
+                    try:
+                        subprocess.check_call(
+                            ["curl", "-L", "--silent", "--show-error", "-o", fpath, url],
+                            stdout=sys.stdout, stderr=sys.stderr
+                        )
+                        print(f"   ✅ {fname} 下载完成")
+                    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                        print(f"   ❌ 下载 {fname} 失败: {e}")
+                        print(f"   请手动从 {url} 下载并放到 {fpath}")
+                        return
+        print()
+
+        # 步骤 5: 环境变量提示
+        print("⚙️  步骤 5/6: 配置环境变量...")
+        print(f"   请在 shell 配置文件中添加以下行：")
+        print(f"   export MEMORYTREE_EMBEDDING_MODEL=local:{MODEL_NAME}")
+        print()
+        print(f"   或临时设置（当前会话有效）：")
+        print(f"   export MEMORYTREE_EMBEDDING_MODEL=local:{MODEL_NAME}")
+        print()
+
+        # 步骤 6: 验证
+        print("🧪 步骤 6/6: 验证模型...")
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            # 如果尚未设置环境变量，临时设置以验证
+            old_env = os.environ.get("MEMORYTREE_EMBEDDING_MODEL", "")
+            os.environ["MEMORYTREE_EMBEDDING_MODEL"] = f"local:{MODEL_NAME}"
+
+            model = SentenceTransformer(CACHE_DIR)
+            embedding = model.encode("测试中文句子")
+            print(f"   ✅ 模型验证成功！向量维度: {len(embedding)}")
+            print(f"   样本输出: {embedding[:5].tolist()}...")
+
+            if old_env:
+                os.environ["MEMORYTREE_EMBEDDING_MODEL"] = old_env
+            elif "MEMORYTREE_EMBEDDING_MODEL" in os.environ:
+                del os.environ["MEMORYTREE_EMBEDDING_MODEL"]  # 不保留临时设置
+
+        except Exception as e:
+            print(f"   ⚠️  验证失败（可能仍需设置环境变量）: {e}")
+            print(f"   请确保已设置: export MEMORYTREE_EMBEDDING_MODEL=local:{MODEL_NAME}")
+
+        print()
+        print("═" * 40)
+        print("✅ 安装引导完成！")
+        print()
+        print("📝 下一步:")
+        print(f"   1. 在 shell 配置 (~/.zshrc 或 ~/.bashrc) 中添加：")
+        print(f"      export MEMORYTREE_EMBEDDING_MODEL=local:{MODEL_NAME}")
+        print(f"   2. 重新加载配置: source ~/.zshrc")
+        print(f"   3. 重新启动 Hermes Agent 或重新加载 mindmap-memory 技能")
+        print(f"   4. 运行 'python3 mindmap_memory.py consolidate' 测试嵌入模型")
+        print()
+
 
 # ---------------------------------------------------------------------------
 # CLI 入口 — 独立运行或作为库导入
@@ -2322,7 +2500,15 @@ class MindMapStore:
 
 def cli_main():
     """命令行入口。支持 add, search, recall, decay, migrate, core, stats, sync, replace, remove, recover 命令。"""
+    json_mode = "--json" in sys.argv
+    if json_mode:
+        sys.argv.remove("--json")
+        logging.getLogger().setLevel(logging.WARNING)
+
     if len(sys.argv) < 2:
+        if json_mode:
+            print(json.dumps({"command": "help", "available": ["add", "search", "recall", "decay", "migrate", "sync", "replace", "remove", "recover", "core", "stats", "consolidate", "setup-embeddings"]}))
+            return
         print("用法: python mindmap_memory.py <命令> [参数]")
         print()
         print("命令:")
@@ -2338,6 +2524,7 @@ def cli_main():
         print("  remove <搜索>          删除指定记忆")
         print("  recover [搜索]          恢复已删除的记忆")
         print("  consolidate            记忆守护：用嵌入模型重分类当天记忆")
+        print("  setup-embeddings       安装引导：自动下载并配置 BGE 嵌入模型")
         print()
         print("在 Hermes 对话中使用 /mindmap-memory 加载此技能")
         return
@@ -2348,59 +2535,97 @@ def cli_main():
 
     if command == "add":
         if len(sys.argv) < 3:
-            print("错误: 需要提供记忆内容")
+            if json_mode:
+                print(json.dumps({"command": "add", "success": False, "error": "需要提供记忆内容"}))
+            else:
+                print("错误: 需要提供记忆内容")
             return
         content = " ".join(sys.argv[2:])
         node_id = store.add_memory(content)
-        print(f"✅ 已添加记忆 | 节点ID: {node_id[:8]}...")
+        if json_mode:
+            print(json.dumps({"command": "add", "success": True, "node_id": node_id}))
+        else:
+            print(f"✅ 已添加记忆 | 节点ID: {node_id[:8]}...")
         store.write_index_to_md()
 
     elif command == "search":
         if len(sys.argv) < 3:
-            print("错误: 需要提供查询内容")
+            if json_mode:
+                print(json.dumps({"command": "search", "success": False, "error": "需要提供查询内容"}))
+            else:
+                print("错误: 需要提供查询内容")
             return
         query = " ".join(sys.argv[2:])
         results = store.search(query)
-        if results:
-            print(f"🔍 找到 {len(results)} 条相关记忆:\n")
-            for i, node in enumerate(results, 1):
-                print(f"  [{i}] {node.topic}")
-                print(f"      分数: {node.score} ({node.score_category()})")
-                print(f"      核心: {'⭐是' if node.is_core else '否'}")
-                if node.content:
-                    preview = node.content[:100].replace("\n", " ")
-                    if len(node.content) > 100:
-                        preview += "…"
-                    print(f"      内容: {preview}")
-                print()
+        if json_mode:
+            result_list = []
+            for node in results:
+                result_list.append({
+                    "topic": node.topic,
+                    "score": node.score,
+                    "score_category": node.score_category(),
+                    "is_core": node.is_core,
+                    "content": node.content
+                })
+            print(json.dumps({"command": "search", "count": len(results), "results": result_list}))
         else:
-            print("未找到相关记忆。")
+            if results:
+                print(f"🔍 找到 {len(results)} 条相关记忆:\n")
+                for i, node in enumerate(results, 1):
+                    print(f"  [{i}] {node.topic}")
+                    print(f"      分数: {node.score} ({node.score_category()})")
+                    print(f"      核心: {'⭐是' if node.is_core else '否'}")
+                    if node.content:
+                        preview = node.content[:100].replace("\n", " ")
+                        if len(node.content) > 100:
+                            preview += "…"
+                        print(f"      内容: {preview}")
+                    print()
+            else:
+                print("未找到相关记忆。")
 
     elif command == "recall":
         if not store.root_ids:
-            print("记忆树为空。")
+            if json_mode:
+                print(json.dumps({"command": "recall", "tree": ""}))
+            else:
+                print("记忆树为空。")
         else:
-            print(store.generate_index())
+            tree = store.generate_index()
+            if json_mode:
+                print(json.dumps({"command": "recall", "tree": tree}))
+            else:
+                print(tree)
 
     elif command == "decay":
         removed = store.decay_if_needed()
-        if removed:
-            print(f"🗑️  衰减扫描完成，已删除 {len(removed)} 个节点")
+        count = len(removed) if removed else 0
+        if json_mode:
+            print(json.dumps({"command": "decay", "removed_count": count}))
         else:
-            print("✅ 衰减扫描完成，无需删除节点。")
+            if removed:
+                print(f"🗑️  衰减扫描完成，已删除 {count} 个节点")
+            else:
+                print("✅ 衰减扫描完成，无需删除节点。")
         store.write_index_to_md()
 
     elif command == "migrate":
         count = store.migrate_from_flat()
-        if count > 0:
-            print(f"✅ 已迁移 {count} 条扁平记忆到树形结构")
-            store.write_index_to_md()
+        if json_mode:
+            print(json.dumps({"command": "migrate", "count": count}))
         else:
-            print("无需迁移（记忆树已存在或 MEMORY.md 为空）。")
+            if count > 0:
+                print(f"✅ 已迁移 {count} 条扁平记忆到树形结构")
+                store.write_index_to_md()
+            else:
+                print("无需迁移（记忆树已存在或 MEMORY.md 为空）。")
 
     elif command == "core":
         if len(sys.argv) < 3:
-            print("错误: 需要提供节点 ID")
+            if json_mode:
+                print(json.dumps({"command": "core", "success": False, "error": "需要提供节点 ID"}))
+            else:
+                print("错误: 需要提供节点 ID")
             return
         node_id_prefix = sys.argv[2]
         matched = None
@@ -2409,85 +2634,122 @@ def cli_main():
                 matched = nid
                 break
         if not matched:
-            print(f"未找到节点: {node_id_prefix}")
+            if json_mode:
+                print(json.dumps({"command": "core", "success": False, "error": f"未找到节点: {node_id_prefix}"}))
+            else:
+                print(f"未找到节点: {node_id_prefix}")
             return
         node = store.nodes[matched]
         new_state = not node.is_core
         store.set_core(matched, new_state)
-        print(f"✅ 节点 '{node.topic}' 核心标记已设为 {new_state}")
+        if json_mode:
+            print(json.dumps({"command": "core", "success": True, "node_id": matched, "new_state": new_state}))
+        else:
+            print(f"✅ 节点 '{node.topic}' 核心标记已设为 {new_state}")
 
     elif command == "replace":
         if len(sys.argv) < 4:
-            print("错误: 用法: python mindmap_memory.py replace <搜索文本> <新内容>")
+            if json_mode:
+                print(json.dumps({"command": "replace", "success": False, "error": "用法: python mindmap_memory.py replace <搜索文本> <新内容>"}))
+            else:
+                print("错误: 用法: python mindmap_memory.py replace <搜索文本> <新内容>")
             return
         search_text = sys.argv[2]
         new_content = " ".join(sys.argv[3:])
         result = store.replace_memory(search_text, new_content)
-        if result.get("success"):
-            print(f"✅ {result['message']}")
-            store.write_index_to_md()
-        elif "candidates" in result:
-            print(f"⚠️  {result['error']}")
-            for c in result["candidates"]:
-                print(f"    [{c['node_id']}] {c['topic']}: {c['preview']}")
+        if json_mode:
+            print(json.dumps({"command": "replace", **result}))
         else:
-            print(f"❌ {result['error']}")
+            if result.get("success"):
+                print(f"✅ {result['message']}")
+                store.write_index_to_md()
+            elif "candidates" in result:
+                print(f"⚠️  {result['error']}")
+                for c in result["candidates"]:
+                    print(f"    [{c['node_id']}] {c['topic']}: {c['preview']}")
+            else:
+                print(f"❌ {result['error']}")
 
     elif command == "remove":
         if len(sys.argv) < 3:
-            print("错误: 用法: python mindmap_memory.py remove <搜索文本>")
+            if json_mode:
+                print(json.dumps({"command": "remove", "success": False, "error": "用法: python mindmap_memory.py remove <搜索文本>"}))
+            else:
+                print("错误: 用法: python mindmap_memory.py remove <搜索文本>")
             return
         search_text = " ".join(sys.argv[2:])
         force = "--force" in sys.argv
         result = store.remove_memory(search_text, force=force)
-        if result.get("success"):
-            print(f"✅ {result['message']}")
-            store.write_index_to_md()
-        elif "candidates" in result:
-            print(f"⚠️  {result['error']}")
-            for c in result["candidates"]:
-                core = "⭐" if c["is_core"] else "  "
-                print(f"    {core} [{c['node_id']}] {c['topic']}: {c['preview']}")
+        if json_mode:
+            print(json.dumps({"command": "remove", **result}))
         else:
-            print(f"❌ {result['error']}")
+            if result.get("success"):
+                print(f"✅ {result['message']}")
+                store.write_index_to_md()
+            elif "candidates" in result:
+                print(f"⚠️  {result['error']}")
+                for c in result["candidates"]:
+                    core = "⭐" if c["is_core"] else "  "
+                    print(f"    {core} [{c['node_id']}] {c['topic']}: {c['preview']}")
+            else:
+                print(f"❌ {result['error']}")
 
     elif command == "recover":
         search_text = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else ""
         result = store.recover_memory(search_text)
-        if result.get("recovered", 0) > 0:
-            print(f"✅ {result['message']}")
-            store.write_index_to_md()
-        elif "candidates" in result:
-            print(f"📋 {result['message']}:")
-            for c in result["candidates"]:
-                print(f"    [{c['node_id']}] {c['topic']} ({c['deleted_at']}) {c['preview']}")
-        elif result.get("success"):
-            print(f"✅ {result['message']}")
+        if json_mode:
+            print(json.dumps({"command": "recover", **result}))
         else:
-            print(f"❌ {result['error']}")
+            if result.get("recovered", 0) > 0:
+                print(f"✅ {result['message']}")
+                store.write_index_to_md()
+            elif "candidates" in result:
+                print(f"📋 {result['message']}:")
+                for c in result["candidates"]:
+                    print(f"    [{c['node_id']}] {c['topic']} ({c['deleted_at']}) {c['preview']}")
+            elif result.get("success"):
+                print(f"✅ {result['message']}")
+            else:
+                print(f"❌ {result['error']}")
 
     elif command == "consolidate":
         count = store.consolidate_today()
-        if count > 0:
-            print(f"🧠 记忆守护完成：{count} 个节点重新分类")
-            store.write_index_to_md()
+        if json_mode:
+            print(json.dumps({"command": "consolidate", "count": count}))
         else:
-            print("🧠 记忆守护：无需重新分类（可能未配置嵌入模型或无当天新增记忆）")
+            if count > 0:
+                print(f"🧠 记忆守护完成：{count} 个节点重新分类")
+                store.write_index_to_md()
+            else:
+                print("🧠 记忆守护：无需重新分类（可能未配置嵌入模型或无当天新增记忆）")
+
+    elif command == "setup-embeddings":
+        store.setup_embeddings()
 
     elif command == "stats":
-        store.print_stats()
+        stats_data = store.stats()
+        if json_mode:
+            print(json.dumps({"command": "stats", "data": stats_data}))
+        else:
+            store.print_stats()
 
     elif command == "sync":
         count = store.sync_from_native()
-        if count > 0:
-            print(f"✅ 已从 MEMORY.md 导入 {count} 条新记忆")
-            store.write_index_to_md()
+        if json_mode:
+            print(json.dumps({"command": "sync", "count": count}))
         else:
-            print("✅ 无需同步（无新增条目）")
+            if count > 0:
+                print(f"✅ 已从 MEMORY.md 导入 {count} 条新记忆")
+                store.write_index_to_md()
+            else:
+                print("✅ 无需同步（无新增条目）")
 
     else:
-        print(f"未知命令: {command}")
-        print("可用: add, search, recall, decay, migrate, sync, replace, remove, recover, core, stats")
+        if json_mode:
+            print(json.dumps({"command": "unknown", "available": ["add", "search", "recall", "decay", "migrate", "sync", "replace", "remove", "recover", "core", "stats", "consolidate", "setup-embeddings"]}))
+        else:
+            print(f"未知命令: {command}")
+            print("可用: add, search, recall, decay, migrate, sync, replace, remove, recover, core, stats, consolidate, setup-embeddings")
 
 
 if __name__ == "__main__":
