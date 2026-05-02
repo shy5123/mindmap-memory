@@ -250,6 +250,8 @@ if __name__ == "__main__":
     test_transaction_rollback()
     test_api_error_handling()
     test_sync_debounce()
+    test_core_memory_protection()
+    test_core_removal_protection()
 
     print("\n" + "=" * 60)
     print(f"  📊 总结果: {PASS} 通过, {FAIL} 失败")

@@ -12,7 +12,7 @@
     ├── 存储层: load/save (SQLite 事务持久化)
     ├── 分类层: add_memory (语义匹配 + 自动建节点)
     ├── 检索层: search (逐层下钻检索)
-    ├── 遗忘层: decay (每周衰减扫描)
+    ├── 遗忘层: decay (每14天衰减扫描)
     └── 索引层: generate_index (生成轻量系统提示)
 
 数据文件: ~/.hermes/memories/mindmap.db (SQLite，自动从 mindmap.json 迁移)
@@ -77,8 +77,8 @@ MAX_NON_CORE_NODES = 10_000      # 非核心节点总数上限
 NEW_NODE_SCORE = 2               # 新建节点的初始分数（≤2 将沉入树根）
 ACCESS_SCORE_INCREMENT = 1       # 每次访问加分
 PARENT_MAX_BONUS = 0.1           # 父节点加分上限
-DECAY_AMOUNT = 1                 # 每周衰减量
-DECAY_INTERVAL_DAYS = 7          # 衰减间隔（天）
+DECAY_AMOUNT = 1                 # 每周期衰减量（14天）
+DECAY_INTERVAL_DAYS = 14         # 衰减间隔（天）
 CORE_MIN_SCORE = 3               # 核心记忆最低分数（>2 确保永不下沉）
 SHORT_TERM_MAX = 20              # 短期记忆上限
 LONG_TERM_MAX = 40               # 长期记忆上限（>40 为永久记忆）
@@ -1532,8 +1532,8 @@ class MindMapStore:
         for node in unique_results:
             self._apply_access_bonus(node.id)
 
-        # 宽搜兜底：下钻结果 < 2 条时，混合搜索匹配所有活跃叶子
-        if len(unique_results) < 2:
+        # 宽搜兜底：下钻结果 < 5 条时，混合搜索匹配所有活跃叶子
+        if len(unique_results) < 5:
             all_leaves = [
                 n for n in self.nodes.values()
                 if n.is_leaf and n.content and not n.deleted and not n.is_deep
@@ -1605,6 +1605,7 @@ class MindMapStore:
     ) -> List[Tuple[str, float]]:
         """在指定候选节点列表中搜索匹配。
 
+        使用混合搜索（BM25 稀疏检索 + 关键词相似度 + RRF 融合），
         同时匹配节点的 topic 和 content（对于叶子节点，content 包含完整记忆）。
         按分数和最近访问时间排序。
 
@@ -1615,8 +1616,7 @@ class MindMapStore:
         Returns:
             [(节点ID, 相似度), ...] 按相关性排序
         """
-        scored = []
-        # 批量模式：收集所有候选文本，一次编码
+        # 收集所有候选文本
         node_ids = []
         search_texts = []
         for node_id in candidates:
@@ -1639,16 +1639,19 @@ class MindMapStore:
         if not node_ids:
             return []
 
-        # 批量计算相似度
-        sims = self.matcher.batch_similarity(query, search_texts)
-        for node_id, sim in zip(node_ids, sims):
-            if sim >= MATCH_THRESHOLD:
-                scored.append((node_id, sim))
+        # 使用混合搜索（BM25 + 语义相似度 + RRF 融合）
+        hybrid_results = self.matcher.hybrid_search(query, search_texts)
+        self._hybrid_search_count += 1
+
+        scored = []
+        for idx, rrf_score in hybrid_results:
+            if rrf_score > 0:  # RRF 正值表示至少在一个排序中命中
+                scored.append((node_ids[idx], rrf_score))
 
         # 先按相似度排序，同相似度按分数+时间排序
         scored.sort(
             key=lambda x: (
-                -x[1],                                    # 相似度越高越好
+                -x[1],                                    # RRF分数越高越好
                 -self.nodes[x[0]].score,                  # 分数越高越好
                 self.nodes[x[0]].last_access,             # 时间越新越好
             )
