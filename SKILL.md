@@ -201,6 +201,7 @@ export MEMORYTREE_EMBEDDING_MODEL=local:BAAI/bge-small-zh-v1.5
 - PyTorch 2.2 + transformers≥5.0 不兼容 → 降级 `transformers==4.44.0`
 - ModelScope 的 `2_Normalize/config.json` 可能为空，创建空 `{}` 即可
 - 首次加载约 1.3s，之后编码速度 100-130 it/s (CPU)
+- **Intel Mac (x86_64) 特殊处理**：torch ≥ 2.6 不支持 x86_64 macOS，最高只能装 2.2.2。需额外降级 numpy 和 sentence-transformers，详见 `references/intel-mac-embedding-setup.md`
 
 ## 开发注意事项
 
@@ -236,7 +237,9 @@ export MEMORYTREE_EMBEDDING_MODEL=local:BAAI/bge-small-zh-v1.5
    `_log_decay` 调用处的 `actually_removed` 从 `n.id not in self.nodes` 改为 `n.deleted`。
    修复后 remove/decay 的软删除正确跨会话持久化，`recover` 可正常恢复。
 
-7. **新增字段检查清单** — 给 MemoryNode 加字段时，按此顺序：
+7. **`consolidate_today` 在 KeywordModel 下不更新 `last_consolidate`（v1.5.0 已修复）** — 修复前 `consolidate_today()` 检测到默认 KeywordModel 时直接 return 0 且不更新 `last_consolidate`，导致每次 `load()` 都空转一次 `consolidate_if_needed()`。修复：在 return 0 前执行 `self.last_consolidate = _now_iso(); self.save()`。此后无嵌入模型时也不会空转。
+
+8. **新增字段检查清单** — 给 MemoryNode 加字段时，按此顺序：
    ① `MemoryNode` dataclass 加字段（默认值）
    ② `load()` CREATE TABLE schema 加列
    ③ `load()` 后 `ALTER TABLE ADD COLUMN` 兜底（try/except OperationalError）
