@@ -2253,7 +2253,7 @@ class MindMapStore:
     def sync_from_native(self) -> int:
         """扫描 MEMORY.md，将 mindmap.db 中没有的条目自动纳入。
 
-        在每次 write_index_to_md() 前自动调用（园丁同步），
+        在每次 write_index_to_md() 前自动调用（修剪同步），
         也暴露为独立的 CLI 命令和 API。
 
         Returns:
@@ -2305,7 +2305,7 @@ class MindMapStore:
                 imported += 1
 
         if imported:
-            logger.info("园丁同步: 从 MEMORY.md 导入 %d 条新记忆", imported)
+            logger.info("修剪同步: 从 MEMORY.md 导入 %d 条新记忆", imported)
         return imported
 
     def migrate_from_flat(self, memory_md_path: Optional[Path] = None) -> int:
@@ -2485,7 +2485,7 @@ class MindMapStore:
     def write_index_to_md(self) -> bool:
         """将索引写入 MEMORY.md 文件，替换旧扁平格式。
 
-        写入前自动执行园丁同步：扫描 MEMORY.md 中是否有原生 memory 工具
+        写入前自动执行修剪同步：扫描 MEMORY.md 中是否有原生 memory 工具
         新增的条目，如有则自动纳入 mindmap.db。
 
         Hermes 启动时会自动将此文件内容注入 system prompt。
@@ -2493,7 +2493,7 @@ class MindMapStore:
         Returns:
             True 写入成功
         """
-        # 园丁同步：检查原生 memory 工具是否有新增
+        # 修剪同步：检查原生 memory 工具是否有新增
         self.sync_from_native()
         mem_dir = _get_memories_dir()
         mem_dir.mkdir(parents=True, exist_ok=True)
@@ -2573,7 +2573,7 @@ class MindMapStore:
             "最大深度": max_found_depth,
             "深度限制": MAX_DEPTH,
             "上次衰减": self.last_decay or "未执行",
-            "上次园丁": self.last_consolidate or "未执行",
+            "上次修剪": self.last_consolidate or "未执行",
             "跳过重复(哈希去重)": self._duplicates_skipped,
             "内存哈希数": len(self._content_hashes),
             "混合搜索使用次数": self._hybrid_search_count,
