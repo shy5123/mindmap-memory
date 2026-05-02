@@ -1963,6 +1963,8 @@ class MindMapStore:
         # 只有嵌入模型才值得重分类
         if not hasattr(self.matcher, 'batch_similarity') or \
            type(self.matcher).__name__ == 'KeywordModel':
+            self.last_consolidate = _now_iso()
+            self.save()
             return 0
 
         today_prefix = datetime.now().strftime("%Y-%m-%d")
