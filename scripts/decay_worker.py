@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-衰减工作脚本 — 定时触发记忆衰减扫描 / 记忆守护
+衰减工作脚本 — 定时触发记忆衰减扫描 / 记忆园丁
 =====================================
 
 用法:
     python3 scripts/decay_worker.py                  # 手动触发一次衰减
     python3 scripts/decay_worker.py --dry-run         # 预览将被删除的节点
-    python3 scripts/decay_worker.py --consolidate     # 手动触发记忆守护（重分类当天记忆）
+    python3 scripts/decay_worker.py --consolidate     # 手动触发记忆园丁（重分类当天记忆）
 
 建议配置 cron 定时任务（如 cronjob 工具）：
     每周日凌晨 2:00 执行: python3 decay_worker.py
@@ -42,9 +42,9 @@ def main():
     if consolidate_mode:
         count = store.consolidate_today()
         if count > 0:
-            print(f"🧠 记忆守护完成：{count} 个节点重新分类")
+            print(f"🧠 记忆园丁完成：{count} 个节点重新分类")
         else:
-            print("🧠 记忆守护：无需重新分类")
+            print("🧠 记忆园丁：无需重新分类")
         return 0
 
     if not store.nodes:

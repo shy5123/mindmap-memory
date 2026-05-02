@@ -793,7 +793,7 @@ class MindMapStore:
         self.nodes: Dict[str, MemoryNode] = {}  # id → node
         self.root_ids: List[str] = []            # 根节点 ID 列表
         self.last_decay: Optional[str] = None    # 上次衰减时间 (ISO 8601)
-        self.last_consolidate: Optional[str] = None  # 上次记忆守护时间
+        self.last_consolidate: Optional[str] = None  # 上次记忆园丁时间
         self.version: int = 1                    # 数据格式版本
         self.matcher: SemanticModel = matcher or _get_matcher()
         # 分类匹配器：默认用关键词（快速），可单独配置
@@ -816,11 +816,11 @@ class MindMapStore:
 
         如果数据库不存在，尝试从旧 mindmap.json 自动迁移。
         加载后自动检查是否需要衰减扫描（距上次超过 7 天则执行）。
-        加载后自动检查是否需要记忆守护（距上次超过 24 小时则执行）。
+        加载后自动检查是否需要记忆园丁（距上次超过 24 小时则执行）。
 
         Args:
             auto_decay: 是否加载后自动衰减（默认 True）
-            auto_consolidate: 是否加载后自动记忆守护（默认 True）
+            auto_consolidate: 是否加载后自动记忆园丁（默认 True）
 
         Returns:
             True 如果成功加载，False 如果是新数据库
@@ -918,7 +918,7 @@ class MindMapStore:
             if auto_decay:
                 self.decay_if_needed()
 
-            # 自动记忆守护：距上次超过 24 小时则执行
+            # 自动记忆园丁：距上次超过 24 小时则执行
             if auto_consolidate:
                 self.consolidate_if_needed()
 
@@ -1935,11 +1935,11 @@ class MindMapStore:
         }
 
     # ------------------------------------------------------------------
-    # 记忆守护 — 嵌入模型重分类当天记忆
+    # 记忆园丁 — 嵌入模型重分类当天记忆
     # ------------------------------------------------------------------
 
     def _should_consolidate(self) -> bool:
-        """判断是否需要执行记忆守护（距上次超过 24 小时）。"""
+        """判断是否需要执行记忆园丁（距上次超过 24 小时）。"""
         if not self.last_consolidate:
             return True
         try:
@@ -1950,7 +1950,7 @@ class MindMapStore:
             return True
 
     def consolidate_if_needed(self) -> int:
-        """如果需要，执行记忆守护。"""
+        """如果需要，执行记忆园丁。"""
         if not self._should_consolidate():
             return 0
         return self.consolidate_today()
@@ -2029,7 +2029,7 @@ class MindMapStore:
                 node.last_access = _now_iso()
                 migrated += 1
                 logger.info(
-                    "记忆守护: '%s' 从 '%s' 迁移到 '%s' (sim %.3f → %.3f)",
+                    "记忆园丁: '%s' 从 '%s' 迁移到 '%s' (sim %.3f → %.3f)",
                     node.topic[:20],
                     self.nodes[old_parent].topic if old_parent and old_parent in self.nodes else "根",
                     best_root.topic[:20],
@@ -2039,7 +2039,7 @@ class MindMapStore:
         self.last_consolidate = _now_iso()
         if migrated > 0:
             self.save()
-            logger.info("记忆守护完成: %d/%d 个节点重新分类", migrated, len(today_leaves))
+            logger.info("记忆园丁完成: %d/%d 个节点重新分类", migrated, len(today_leaves))
         return migrated
 
     # ------------------------------------------------------------------
@@ -2253,7 +2253,7 @@ class MindMapStore:
     def sync_from_native(self) -> int:
         """扫描 MEMORY.md，将 mindmap.db 中没有的条目自动纳入。
 
-        在每次 write_index_to_md() 前自动调用（守护同步），
+        在每次 write_index_to_md() 前自动调用（园丁同步），
         也暴露为独立的 CLI 命令和 API。
 
         Returns:
@@ -2305,7 +2305,7 @@ class MindMapStore:
                 imported += 1
 
         if imported:
-            logger.info("守护同步: 从 MEMORY.md 导入 %d 条新记忆", imported)
+            logger.info("园丁同步: 从 MEMORY.md 导入 %d 条新记忆", imported)
         return imported
 
     def migrate_from_flat(self, memory_md_path: Optional[Path] = None) -> int:
@@ -2485,7 +2485,7 @@ class MindMapStore:
     def write_index_to_md(self) -> bool:
         """将索引写入 MEMORY.md 文件，替换旧扁平格式。
 
-        写入前自动执行守护同步：扫描 MEMORY.md 中是否有原生 memory 工具
+        写入前自动执行园丁同步：扫描 MEMORY.md 中是否有原生 memory 工具
         新增的条目，如有则自动纳入 mindmap.db。
 
         Hermes 启动时会自动将此文件内容注入 system prompt。
@@ -2493,7 +2493,7 @@ class MindMapStore:
         Returns:
             True 写入成功
         """
-        # 守护同步：检查原生 memory 工具是否有新增
+        # 园丁同步：检查原生 memory 工具是否有新增
         self.sync_from_native()
         mem_dir = _get_memories_dir()
         mem_dir.mkdir(parents=True, exist_ok=True)
@@ -2573,7 +2573,7 @@ class MindMapStore:
             "最大深度": max_found_depth,
             "深度限制": MAX_DEPTH,
             "上次衰减": self.last_decay or "未执行",
-            "上次守护": self.last_consolidate or "未执行",
+            "上次园丁": self.last_consolidate or "未执行",
             "跳过重复(哈希去重)": self._duplicates_skipped,
             "内存哈希数": len(self._content_hashes),
             "混合搜索使用次数": self._hybrid_search_count,
@@ -2788,7 +2788,7 @@ def cli_main():
         print("  replace <搜索> <新内容>  替换已有记忆")
         print("  remove <搜索>          删除指定记忆")
         print("  recover [搜索]          恢复已删除的记忆")
-        print("  consolidate            记忆守护：用嵌入模型重分类当天记忆")
+        print("  consolidate            记忆园丁：用嵌入模型重分类当天记忆")
         print("  setup-embeddings       安装引导：自动下载并配置 BGE 嵌入模型")
         print()
         print("在 Hermes 对话中使用 /mindmap-memory 加载此技能")
@@ -2983,10 +2983,10 @@ def cli_main():
             print(json.dumps({"command": "consolidate", "count": count}))
         else:
             if count > 0:
-                print(f"🧠 记忆守护完成：{count} 个节点重新分类")
+                print(f"🧠 记忆园丁完成：{count} 个节点重新分类")
                 store.write_index_to_md()
             else:
-                print("🧠 记忆守护：无需重新分类（可能未配置嵌入模型或无当天新增记忆）")
+                print("🧠 记忆园丁：无需重新分类（可能未配置嵌入模型或无当天新增记忆）")
 
     elif command == "setup-embeddings":
         store.setup_embeddings()

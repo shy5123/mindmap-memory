@@ -21,14 +21,14 @@ BODY = """v1.5.0 — 嵌入模型修复 + 混合搜索 + 内容哈希去重
 - 嵌入模型本地路径加载修复：_get_matcher 支持 local:/path/to/model 和 local:BAAI/bge-small-zh-v1.5 两种格式，绕过 torch 2.2.2 安全检查限制
 - Intel Mac (x86_64) 兼容：torch 2.2.2 + sentence-transformers 2.7.0 + numpy 1.26.4 确认可用
 - 模型配置修复：为 BGE 池化配置补齐 word_embedding_dimension=512
-- 记忆守护空转修复：无嵌入模型时 consolidate_today 也更新 last_consolidate 时间戳
+- 记忆园丁空转修复：无嵌入模型时 consolidate_today 也更新 last_consolidate 时间戳
 - 核心记忆恢复与重复节点清理
 - 核心保护测试：pre_release_tests 新增验证用例
 
 ⚙️ 技术细节
 - 核心文件：mindmap_memory.py (3022 行)
 - 语义相似度实测：编程语言↔Python 从 ~0.0 升至 0.801
-- 记忆守护首次真正执行：4/29 个叶子节点重新分类
+- 记忆园丁首次真正执行：4/29 个叶子节点重新分类
 - 零新增外部依赖
 """
 

@@ -30,7 +30,7 @@ metadata:
 - **迁移兼容**：首次运行自动将旧 MEMORY.md 迁移为树形结构
 - **遗忘日志**：删除的内容写入日志，可后悔恢复
 - **自动触发**：对话中自然提及记忆关键词时静默后台执行，无需手动命令
-- **守护同步**：每次写 MEMORY.md 前自动扫描原生 memory 工具的新增条目并纳入
+- **园丁同步**：每次写 `MEMORY.md` 前自动扫描原生 memory 工具的新增条目并纳入
 - **原生 API**：注册为 Hermes 一等公民工具 `memory_tree_add/search/sync/replace/remove/recover`，不再依赖 terminal()
 - **完整 CRUD**：支持 add / search / replace / remove，与原 memory 工具对等
 - **可插拔模型**：默认关键词匹配（零依赖），可选配置 BGE 嵌入模型提升语义理解（强烈建议）
@@ -116,7 +116,7 @@ python3 mindmap_memory.py recover ["关键词"]          # 恢复已删除的记
 python3 mindmap_memory.py sync             # 从 MEMORY.md 增量导入
 python3 mindmap_memory.py recall           # 查看完整记忆树
 python3 mindmap_memory.py decay            # 手动触发衰减
-python3 mindmap_memory.py consolidate      # 记忆守护：用嵌入模型重分类
+python3 mindmap_memory.py consolidate      # 记忆园丁：用嵌入模型重分类
 python3 mindmap_memory.py setup-embeddings  # 自动安装引导 BGE 嵌入模型
 python3 mindmap_memory.py migrate          # 迁移旧记忆
 python3 mindmap_memory.py core <id>        # 切换核心记忆标记

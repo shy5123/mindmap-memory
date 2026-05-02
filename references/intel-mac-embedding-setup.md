@@ -101,7 +101,7 @@ print('Matcher:', type(m.matcher).__name__)
 # 测试语义检索
 r = m.search('编程')
 print(f'search 编程: {len(r)} 条')
-# 触发记忆守护
+# 触发记忆园丁
 c = m.consolidate_today()
 print(f'consolidate: {c} 节点')
 "
