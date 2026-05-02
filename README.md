@@ -3,7 +3,7 @@
 [![Tests](https://github.com/shy5123/mindmap-memory/actions/workflows/test.yml/badge.svg)](https://github.com/shy5123/mindmap-memory/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> 版本 1.5.0
+> 版本 1.5.1
 
 **一棵会新陈代谢的记忆树**
 
@@ -283,7 +283,7 @@ python3 mindmap_memory.py stats --json
 
 ```
 mindmap-memory/
-├── mindmap_memory.py      # 核心引擎 (3022 行)
+├── mindmap_memory.py      # 核心引擎 (3027 行)
 ├── SKILL.md               # Hermes Skill 描述
 ├── README.md              # 项目文档（本文件）
 ├── CHANGELOG.md           # 更新日志
@@ -304,7 +304,7 @@ mindmap-memory/
 │   ├── seed_demo.py       # 演示数据生成脚本
 │   ├── stress_test.py     # 26 项压力测试
 │   ├── edge_tests.py      # 12 项边界值测试
-│   └── pre_release_tests.py  # 18 项发布前补充测试
+│   └── pre_release_tests.py  # 24 项发布前补充测试（含核心保护验证）
 └── tools/
     └── memory_tree_tool.py   # Hermes 原生工具注册
 
@@ -355,11 +355,11 @@ python3 scripts/stress_test.py
 # 12 项边界值测试
 python3 scripts/edge_tests.py
 
-# 18 项发布前补充测试（事务回滚、错误处理、防抖、核心记忆保护）
+# 24 项发布前补充测试（事务回滚、错误处理、防抖、核心保护验证）
 python3 scripts/pre_release_tests.py
 ```
 
-测试覆盖：批量写入、层级结构、检索准确性与性能、访问加分、核心保护、衰减准确性、节点稳定性、语义匹配、深度限制、节点上限淘汰、数据库损坏恢复、迁移幂等、事务回滚、异常输入处理。
+测试覆盖：批量写入、层级结构、检索准确性与性能、访问加分、核心保护、衰减准确性、节点稳定性、语义匹配、深度限制、节点上限淘汰、数据库损坏恢复、迁移幂等、事务回滚、异常输入处理、核心记忆保护验证。
 
 ---
 

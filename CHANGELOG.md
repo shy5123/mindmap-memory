@@ -1,27 +1,14 @@
 # 更新日志 / Changelog
 
-## v1.3.0 (2026-04-30)
-
-**树根深池 — 两段记忆归档系统**
-
-- 活跃树 score≤2 → 沉入树根（is_deep=True），不再直接删除
-- 树根永久归档，同层级结构，不衰减
-- 活跃树无结果时自动搜索树根 → 命中后重新生长枝叶
-- 树根超 3 年未访问 → 按天淘汰最早数据
-- 核心记忆永不下沉（CORE_MIN_SCORE=3）
-- 无嵌入模型时树根阈值降至 0.10
-- 修复核心记忆 score 低于保护值时漏过保护的 bug
-- 非核心节点计数排除 is_deep 树根节点
-
 ## v1.5.1 (2026-05-02)
 
 **核心保护加固 + 预发布测试修复**
 
 🐛 修复
-- 核心记忆 score 保护：`load()` 中新增 CORE_MIN_SCORE 检查，核心节点加载后自动修复 score（之前只在 set_core() 中修复，通过 SQLite 直接写入可能绕过）
+- 核心记忆 score 保护：`load()` 中新增 CORE_MIN_SCORE 检查，核心节点加载后自动修复 score（之前只在 set_core() 中修复，通过 SQLite 直接写入可绕过）
 
 🧪 测试
-- `pre_release_tests.py` 新增 `test_core_memory_protection()` 和 `test_core_removal_protection()` 两个验证用例（之前函数名被引用但从未定义，导致脚本崩溃）
+- `pre_release_tests.py` 新增 `test_core_memory_protection()` 和 `test_core_removal_protection()`（之前函数名被引用但从未定义，导致脚本崩溃）
 - 核心记忆保护测试覆盖：set_core 标记 → 低 score 保存 → 重新加载验证
 
 ## v1.5.0 (2026-05-02)
@@ -48,6 +35,19 @@
 - CLI `--json`：所有命令支持 `--json` 参数，输出纯净 JSON（无图标、无中文），适合程序消费
 - `setup-embeddings` 命令：新增自动安装引导命令，自动完成 pip install + huggingface-hub 下载，受限网络自动降级 curl 下载模型文件
 
+## v1.3.0 (2026-04-30)
+
+**树根深池 — 两段记忆归档系统**
+
+- 活跃树 score≤2 → 沉入树根（is_deep=True），不再直接删除
+- 树根永久归档，同层级结构，不衰减
+- 活跃树无结果时自动搜索树根 → 命中后重新生长枝叶
+- 树根超 3 年未访问 → 按天淘汰最早数据
+- 核心记忆永不下沉（CORE_MIN_SCORE=3）
+- 无嵌入模型时树根阈值降至 0.10
+- 修复核心记忆 score 低于保护值时漏过保护的 bug
+- 非核心节点计数排除 is_deep 树根节点
+
 ## v1.2.2 (2026-04-30)
 
 **开源标配**
@@ -59,7 +59,7 @@
 - 新增 `.github/PULL_REQUEST_TEMPLATE.md` PR 模板
 - 新增 `.github/workflows/test.yml` GitHub Actions CI（Python 3.9-3.12，自动跑全部测试）
 - 新增 `install.sh` 一键安装脚本（自动部署 skill + 原生工具）
-- 新增 `scripts/pre_release_tests.py` 18 项发布前补充测试
+- 新增 `scripts/pre_release_tests.py` 发布前补充测试
 - `.gitignore` 增强：新增 `*.db` `decay_log/` `.env` 隐私保护
 - `README.md` 顶部加英文简介 + CI / License 徽章
 

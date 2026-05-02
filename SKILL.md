@@ -1,7 +1,7 @@
 ---
 name: mindmap-memory
 description: "记忆树（MemoryTree）— 一棵会新陈代谢的记忆树"
-version: 1.5.0
+version: 1.5.1
 author: Hermes Agent + User
 license: MIT
 metadata:
