@@ -744,14 +744,19 @@ class LocalEmbeddingModel(SemanticModel):
 def _get_matcher() -> SemanticModel:
     """根据 MEMORYTREE_EMBEDDING_MODEL 创建匹配器。"""
     cfg = os.environ.get("MEMORYTREE_EMBEDDING_MODEL", "").strip()
-    if not cfg or cfg.lower() == "keyword":
+    if not cfg or cfg == "keyword":
         return KeywordModel()
     if ":" in cfg:
         prov, model = cfg.split(":", 1)
-        if prov.lower().strip() == "openai":
+        prov = prov.lower().strip()
+        if prov == "openai":
             logger.info("使用嵌入模型: %s", model.strip())
             return OpenAIEmbeddingModel(model=model.strip())
-        if prov.lower().strip() == "local":
+        if prov == "local":
+            local_path = os.path.expanduser(model).strip()
+            if os.path.isdir(local_path):
+                logger.info("使用本地嵌入模型（本地路径）: %s", local_path)
+                return LocalEmbeddingModel(model_name=local_path)
             logger.info("使用本地嵌入模型: %s", model.strip())
             return LocalEmbeddingModel(model_name=model.strip())
     logger.warning("未知嵌入配置 '%s'，回退关键词", cfg)
