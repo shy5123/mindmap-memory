@@ -13,6 +13,17 @@
 - 修复核心记忆 score 低于保护值时漏过保护的 bug
 - 非核心节点计数排除 is_deep 树根节点
 
+## v1.5.1 (2026-05-02)
+
+**核心保护加固 + 预发布测试修复**
+
+🐛 修复
+- 核心记忆 score 保护：`load()` 中新增 CORE_MIN_SCORE 检查，核心节点加载后自动修复 score（之前只在 set_core() 中修复，通过 SQLite 直接写入可能绕过）
+
+🧪 测试
+- `pre_release_tests.py` 新增 `test_core_memory_protection()` 和 `test_core_removal_protection()` 两个验证用例（之前函数名被引用但从未定义，导致脚本崩溃）
+- 核心记忆保护测试覆盖：set_core 标记 → 低 score 保存 → 重新加载验证
+
 ## v1.5.0 (2026-05-02)
 
 **混合搜索 + 内容哈希去重**

@@ -242,6 +242,75 @@ MEMORY (your personal notes)
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def test_core_memory_protection():
+    """验证核心记忆受到衰减保护，score 不低于 CORE_MIN_SCORE。"""
+    print("\n" + "=" * 60)
+    print(" 测试 4: 核心记忆保护 — 衰减不影响核心节点")
+    print("=" * 60)
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="core_prot_"))
+    db_path = tmpdir / "test.db"
+
+    try:
+        store = MindMapStore(data_path=db_path)
+        store.load(auto_decay=False, auto_consolidate=False)
+
+        nid = store.add_node(topic="核心测试", content="核心记忆应受保护")
+        node = store.nodes.get(nid)
+        assert node, "节点创建失败"
+
+        # 通过 set_core 标记为核心（会触发 score 修复）
+        store.set_core(nid, True)
+        node = store.nodes.get(nid)
+        check("设为核心后score≥3", node and node.score >= 3,
+              f"score={node.score if node else 'N/A'}")
+
+        # 设置 score 为低值后 再调用 load 验证 load 中修复了
+        node.score = 1
+        store.save()
+
+        store2 = MindMapStore(data_path=db_path)
+        store2.load(auto_decay=False, auto_consolidate=False)
+        reloaded = store2.nodes.get(nid)
+
+        # set_core 应该在 load 时也检查 CORE_MIN_SCORE
+        # 如果没修复，说明 load() 缺少保护逻辑（已知问题）
+        check("load后核心节点score≥3", reloaded and reloaded.score >= 3,
+              f"score={reloaded.score if reloaded else 'N/A'}")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_core_removal_protection():
+    """验证删除核心记忆需要 force=True。"""
+    print("\n" + "=" * 60)
+    print(" 测试 5: 核心记忆删除阻挡 — 不加force不删除")
+    print("=" * 60)
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="core_rem_"))
+    db_path = tmpdir / "test.db"
+
+    try:
+        store = MindMapStore(data_path=db_path)
+        store.load(auto_decay=False, auto_consolidate=False)
+
+        nid = store.add_node(topic="不可删", content="核心记忆不可直接删除")
+        node = store.nodes.get(nid)
+        assert node, "节点创建失败"
+
+        node.is_core = True
+        store.save()
+
+        result = store.remove_memory("不可删", force=False)
+        check("无force不删除核心", result is False or result.get("deleted") is not True,
+              f"result={result}")
+
+        result2 = store.remove_memory("不可删", force=True)
+        check("加force可删除核心", result2 is not False, f"result={result2}")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 # ============================================================
 if __name__ == "__main__":
     print("🧪 发布前补充测试")

@@ -922,6 +922,12 @@ class MindMapStore:
             if auto_consolidate:
                 self.consolidate_if_needed()
 
+            # 核心记忆 protection：确保加载后 score 不低于 CORE_MIN_SCORE
+            for node in self.nodes.values():
+                if node.is_core and node.score < CORE_MIN_SCORE:
+                    node.score = CORE_MIN_SCORE
+                    logger.info("修复核心节点 '%s' score: %d → %d", node.topic, node.score, CORE_MIN_SCORE)
+
             return True
 
         except (sqlite3.DatabaseError, json.JSONDecodeError) as e:
